@@ -1,0 +1,161 @@
+{
+  "name": "@typecad/cuttlefish",
+  "version": "1.0.0-alpha.17",
+  "description": "TypeScript to C++ transpiler \u2014 native, Arduino, and bare-metal targets",
+  "type": "module",
+  "main": "./dist/transpile.js",
+  "types": "./dist/transpile.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/transpile.d.ts",
+      "default": "./dist/transpile.js"
+    },
+    "./cli": {
+      "default": "./dist/cli.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "default": "./dist/api/index.js"
+    },
+    "./api/shared": {
+      "types": "./dist/api/shared/index.d.ts",
+      "default": "./dist/api/shared/index.js"
+    },
+    "./board-catalog": {
+      "types": "./dist/board-catalog/index.d.ts",
+      "default": "./dist/board-catalog/index.js"
+    },
+    "./board-gate": {
+      "types": "./dist/board-gate.d.ts",
+      "default": "./dist/board-gate.js"
+    },
+    "./ui-hook": {
+      "types": "./dist/ui-hook.d.ts",
+      "default": "./dist/ui-hook.js"
+    },
+    "./safety-hook-types": {
+      "types": "./dist/safety-hook.d.ts",
+      "default": "./dist/safety-hook.js"
+    },
+    "./safety": {
+      "types": "./dist/safety/authoring.d.ts",
+      "default": "./dist/safety/authoring.js"
+    },
+    "./build-ir-state": {
+      "types": "./dist/ir/build-ir-state.d.ts",
+      "default": "./dist/ir/build-ir-state.js"
+    },
+    "./library-packages": {
+      "types": "./dist/library-packages.d.ts",
+      "default": "./dist/library-packages.js"
+    },
+    "./compliance": {
+      "types": "./dist/emit/compliance/index.d.ts",
+      "default": "./dist/emit/compliance/index.js"
+    },
+    "./config-loader": {
+      "types": "./dist/config-loader.d.ts",
+      "default": "./dist/config-loader.js"
+    },
+    "./utils/ui": {
+      "types": "./dist/utils/ui.d.ts",
+      "default": "./dist/utils/ui.js"
+    },
+    "./stores/display-profile-store": {
+      "types": "./dist/stores/display-profile-store.d.ts",
+      "default": "./dist/stores/display-profile-store.js"
+    },
+    "./stores/theme-store": {
+      "types": "./dist/stores/theme-store.d.ts",
+      "default": "./dist/stores/theme-store.js"
+    },
+    "./api/schema": {
+      "types": "./dist/api/schema/index.d.ts",
+      "default": "./dist/api/schema/index.js"
+    },
+    "./emit/route-hal-op": {
+      "types": "./dist/emit/route-hal-op.d.ts",
+      "default": "./dist/emit/route-hal-op.js"
+    },
+    "./ir/transformers/ui-lowering": {
+      "types": "./dist/ir/transformers/ui-lowering.d.ts",
+      "default": "./dist/ir/transformers/ui-lowering.js"
+    },
+    "./ir/ui-element-auto-wire": {
+      "types": "./dist/ir/ui-element-auto-wire.d.ts",
+      "default": "./dist/ir/ui-element-auto-wire.js"
+    },
+    "./ir/transformers/ui-mount": {
+      "types": "./dist/ir/transformers/ui-mount.d.ts",
+      "default": "./dist/ir/transformers/ui-mount.js"
+    },
+    "./ir/transformers/ui-reactive": {
+      "types": "./dist/ir/transformers/ui-reactive.d.ts",
+      "default": "./dist/ir/transformers/ui-reactive.js"
+    }
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "chalk": "^6.0.0",
+    "inquirer-select-pro": "^1.0.0-alpha.9",
+    "typescript": "^5.7.3",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@typecad/ui": "1.0.0-alpha.17"
+  },
+  "peerDependenciesMeta": {
+    "@typecad/ui": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "serialport": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/justind000/typecode.git",
+    "directory": "packages/cuttlefish"
+  },
+  "homepage": "https://github.com/justind000/typecode/tree/main/packages/cuttlefish",
+  "bugs": {
+    "url": "https://github.com/justind000/typecode/issues"
+  },
+  "keywords": [
+    "arduino",
+    "cli",
+    "codegen",
+    "cpp",
+    "cuttlefish",
+    "embedded",
+    "firmware",
+    "microcontroller",
+    "transpiler",
+    "typecad",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=22.11.0"
+  },
+  "author": "typecad0",
+  "sideEffects": false
+}
