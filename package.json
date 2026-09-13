@@ -1,11 +1,12 @@
 {
   "name": "@typecad/cuttlefish",
-  "version": "1.0.0-alpha.17",
+  "version": "1.0.0-alpha.18",
   "description": "TypeScript to C++ transpiler \u2014 native, Arduino, and bare-metal targets",
   "type": "module",
   "main": "./dist/transpile.js",
   "types": "./dist/transpile.d.ts",
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./dist/transpile.d.ts",
       "default": "./dist/transpile.js"
@@ -52,6 +53,10 @@
     "./library-packages": {
       "types": "./dist/library-packages.d.ts",
       "default": "./dist/library-packages.js"
+    },
+    "./language-server": {
+      "types": "./dist/language-server.d.ts",
+      "default": "./dist/language-server.js"
     },
     "./compliance": {
       "types": "./dist/emit/compliance/index.d.ts",
@@ -115,14 +120,6 @@
     "inquirer-select-pro": "^1.0.0-alpha.9",
     "typescript": "^5.7.3",
     "zod": "^4.4.3"
-  },
-  "peerDependencies": {
-    "@typecad/ui": "1.0.0-alpha.17"
-  },
-  "peerDependenciesMeta": {
-    "@typecad/ui": {
-      "optional": true
-    }
   },
   "optionalDependencies": {
     "serialport": "^13.0.0"

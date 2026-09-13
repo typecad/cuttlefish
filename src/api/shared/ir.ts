@@ -14,6 +14,7 @@
 import type { BoardConstants } from './board-resolver.js';
 import type { Diagnostic } from './types.js';
 import type { RegisteredCallback } from '../../ir/build-ir-state.js';
+import type { HALOpIR } from './hal-op-ir.js';
 
 // Re-export everything from sub-modules so existing imports keep working.
 export type {
@@ -116,7 +117,10 @@ export interface PeripheralUsageIR {
   uart: boolean;
   /** Specific PWM pins used (for targeted timer initialization) */
   pwmPinsUsed: Set<number>;
-  /** Specific ADC channels used */
+  /** Specific ADC channels used. Structured adc ops carry BOARD PIN NUMBERS
+   *  (the op's `pin` field — the report maps pin → silicon channel via the
+   *  board's `zephyr.adc.channels` facts); the arduino-era emit-string paths
+   *  (analogRead) still add arduino channel numbers on those boards only. */
   adcChannelsUsed: Set<number>;
   /** Pins configured as output */
   outputPins: Set<number>;
@@ -130,6 +134,30 @@ export interface PeripheralUsageIR {
   pinsUsed: Set<string>;
   /** Specific pins used for external interrupts */
   interruptPinsUsed: Set<number>;
+  /** USB CDC serial (USBConsole) is used */
+  usb?: boolean;
+  /** Watchdog is used */
+  wdt?: boolean;
+  /** Hardware counters are used */
+  counter?: boolean;
+  /** Specific USB CDC instances used (0 for USB0) */
+  usbInstancesUsed?: Set<number>;
+  /** Hardware counter instances used */
+  counterInstancesUsed?: Set<number>;
+  /** Thread instances started */
+  threadInstancesUsed?: Set<number>;
+  /** Specific I2C bus instances used */
+  i2cInstancesUsed?: Set<number>;
+  /** Specific SPI bus instances used */
+  spiInstancesUsed?: Set<number>;
+  /** Specific UART instances used */
+  uartInstancesUsed?: Set<number>;
+  /** Distinct constructed SPI targets (`bus|cs|hz|mode` keys) */
+  spiTargetsUsed?: Set<string>;
+  /** Distinct DT-bound sensor parts (`part|busKind+instance|port` keys) */
+  sensorPartsUsed?: Set<string>;
+  /** A DT-bound sensor part is used */
+  sensor?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +203,26 @@ export interface ProgramIR {
   defaultExportName?: string;
   /** Registered callbacks from the HAL resolver */
   registeredCallbacks?: RegisteredCallback[];
+  /**
+   * Free functions passed by name as interrupt handlers (e.g.
+   * `pin.onInterrupt(GPIO.INT_EDGE_RISING, isr)`). Their bodies carry no
+   * callback IR node, so interrupt-analysis reads them from program.functions
+   * by this name list to run volatile inference, unsafe-op scanning, and
+   * reentrancy detection on ISR code.
+   */
+  isrHandlerFunctions?: string[];
   /** Map of function names to their rest parameter element types (e.g., "sum" -> "int") */
   restParamFunctions?: Map<string, string>;
+  /**
+   * HAL ops the transpiler resolved to C++ text while inlining one HAL call
+   * into another (e.g. `${gps.available()}` inside a `USB0.writeLine(...)`
+   * template literal). Such ops never become hal-op/hal-expr IR nodes — their
+   * lowered text is baked into `__EMIT__` snprintf preludes and op data
+   * fields — so IR walks alone cannot see them. Recorded during this file's
+   * IR build (markHalOpResolved); framework strategies fold them into the
+   * same per-peripheral scans that walk the IR tree, or shims keyed on those
+   * scans (UART RX rings, sensor handles, per-controller bus state, dt
+   * specs) go undeclared and the build fails.
+   */
+  resolvedHalOps?: HALOpIR[];
 }

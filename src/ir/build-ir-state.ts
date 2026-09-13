@@ -1,4 +1,5 @@
 ﻿import type { FunctionIR, ClassIR, EnumIR, InterfaceIR, TypeAliasIR, ExpressionIR } from "../api/index.js";
+import type { HALOpIR } from "../api/shared/hal-op-ir.js";
 import type { PlatformStrategy } from "../api/shared/index.js";
 import type { Diagnostic } from "../types.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -27,6 +28,12 @@ export interface HALInstance {
 export interface RegisteredCallback {
   placeholderName: string;
   callbackIR: ExpressionIR & { kind: "callback" };
+  /**
+   * The function name emit assigned this callback (`main_isr_N`), written
+   * back by top-level-prep so post-emit consumers (the --diagnostics report)
+   * can report real symbols instead of the __CALLBACK_N__ placeholder.
+   */
+  emittedName?: string;
 }
 
 export type PointerTracker = Map<string, string>;
@@ -71,6 +78,15 @@ export class CompilationContext {
 
   requiredIncludes = new Set<string>();
   registeredCallbacks: RegisteredCallback[] = [];
+
+  /**
+   * Free functions passed BY NAME as interrupt handlers (e.g.
+   * `pin.onInterrupt(GPIO.INT_EDGE_RISING, isr)`). A named handler produces no
+   * callback IR node — the C lowering accepts the bare function name — so the
+   * interrupt-safety analysis would otherwise never see its body. Flows onto
+   * ProgramIR.isrHandlerFunctions at the end of the build.
+   */
+  isrHandlerFunctions = new Set<string>();
 
   _currentBoardConstants: BoardConstants | undefined = undefined;
 
@@ -122,6 +138,18 @@ export class CompilationContext {
    * helper return types. Cleared in resetBuildState.
    */
   activeFunctionReturnTypes = new Map<string, string>();
+
+  /**
+   * Sink for HAL ops resolved to C++ text while building THIS file's IR (the
+   * template-inlining seams — see markHalOpResolved). Assigned by
+   * buildProgramIR before any statement lowering and lifted onto
+   * ProgramIR.resolvedHalOps at the end of the build, so per-file scans
+   * (framework shims) see inlined ops without touching module-global state
+   * (which would split across src/dist module instances under test). Null
+   * outside a build (render-time resolutions are for ops that exist as IR
+   * nodes — they don't need the sink).
+   */
+  resolvedHalOpsSink: HALOpIR[] | null = null;
 }
 
 /**
@@ -228,6 +256,7 @@ export const mcuPinReverseMap = createMapProxy(ctx => ctx.mcuPinReverseMap);
 
 export const requiredIncludes = createSetProxy(ctx => ctx.requiredIncludes);
 export const registeredCallbacks = createArrayProxy(ctx => ctx.registeredCallbacks);
+export const isrHandlerFunctions = createSetProxy(ctx => ctx.isrHandlerFunctions);
 
 // activeLocalTypes / activeGlobalTypes / activeClassFieldTypes were proxied
 // globals; they now live on the IrTypeScope (symbol-types.ts). Callers that
@@ -375,10 +404,15 @@ export function resetBuildState(): void {
   activePeripheralUsage.clear();
   requiredIncludes.clear();
   registeredCallbacks.length = 0;
+  isrHandlerFunctions.clear();
   discriminatedUnionVariantNames.clear();
   restParamFunctions.clear();
   activeFunctionReturnTypes.clear();
   getContext()._currentBoardConstants = undefined;
+  // Detach the per-file resolved-op sink: ops resolved after this file's build
+  // finished (emit-time routing, whose ops exist as IR nodes anyway) must not
+  // append to the array already lifted onto the previous ProgramIR.
+  getContext().resolvedHalOpsSink = null;
 }
 
 // ── Transpile-resolved HAL ops ──────────────────────────────────────────────
@@ -386,21 +420,30 @@ export function resetBuildState(): void {
 // inside another (e.g. `sense.readMillivolts()` in the argument of
 // `USB0.writeLine(...)`) never appear as hal-op/hal-expr IR nodes, so the
 // statement walk in program-analysis can't see them. routeHALOp and
-// resolveHALExprToText record every op they successfully resolve here, and
-// analyzeProgram merges these names into the peripheral usage flags.
+// resolveHALExprToText record every op they successfully resolve here — the
+// full op NODE, not just its name — and analyzeProgram merges these into the
+// peripheral usage flags, while analyzePeripheralUsage merges them into the
+// per-program PeripheralUsage (pins/instances included).
 // Deliberately NOT cleared by
 // resetBuildState (per-file): the ops resolve while building whichever file
 // inlines them, and analyzeProgram runs later, at emit. resetTranspileResolvedHalOps
 // clears it once per transpile run.
-const transpileResolvedHalOps = new Set<string>();
-export function markHalOpResolved(opName: string): void {
-  transpileResolvedHalOps.add(opName);
+const transpileResolvedHalOps: HALOpIR[] = [];
+export function markHalOpResolved(op: HALOpIR): void {
+  transpileResolvedHalOps.push(op);
+  // Per-file sink: the op may never exist as an IR node of the file being
+  // built, so record it on that file's program-to-be (ProgramIR.resolvedHalOps)
+  // as well — see CompilationContext.resolvedHalOpsSink.
+  getContext().resolvedHalOpsSink?.push(op);
+}
+export function getTranspileResolvedOpNodes(): HALOpIR[] {
+  return [...transpileResolvedHalOps];
 }
 export function getTranspileResolvedHalOps(): ReadonlySet<string> {
-  return transpileResolvedHalOps;
+  return new Set(transpileResolvedHalOps.map((op) => op.operation));
 }
 export function resetTranspileResolvedHalOps(): void {
-  transpileResolvedHalOps.clear();
+  transpileResolvedHalOps.length = 0;
 }
 
 export function resetFunctionScopeState(): void {

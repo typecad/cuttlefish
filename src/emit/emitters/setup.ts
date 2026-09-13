@@ -552,7 +552,7 @@ export function buildEmitterContext(
     // SDK skip below — @typecad-scoped libraries would otherwise be treated
     // as type-level-only like the rest of the SDK.
     if (isRegisteredCuttlefishLibrary(imported.moduleSpecifier)) {
-      const resolved = resolveImport(imported, options.libdefs, options.target, options.platformContext, program.fileName);
+      const resolved = resolveImport(imported, options.libdefs, program.fileName);
       includes.push(normalizeInclude(resolved.include));
       Object.assign(symbolMap, resolved.symbolMap);
       if (defaultName) symbolMap[defaultName] = defaultName;
@@ -608,7 +608,7 @@ export function buildEmitterContext(
       }
       if (defaultName) symbolMap[defaultName] = defaultName;
     } else {
-      const resolved = resolveImport(imported, options.libdefs, options.target, options.platformContext, program.fileName);
+      const resolved = resolveImport(imported, options.libdefs, program.fileName);
       includes.push(normalizeInclude(resolved.include));
       Object.assign(symbolMap, resolved.symbolMap);
       if (defaultName) symbolMap[defaultName] = defaultName;
@@ -1293,11 +1293,11 @@ export function buildEmitterContext(
     sourceMapEntries: [],
     headerMapEntries: [],
     // GDB debug mode: emit #line markers at appendSourceLine when 'gdb'.
-    // Resolved once from strategy.debugMode(buildTarget); defaults to 'printf'
+    // Resolved once from strategy.debugMode(buildTarget); defaults to 'none'
     // so all existing paths keep their pre-marker behavior.
     debugMode: (() => {
       const buildTarget = (options.platformContext?.frameworkData as { buildTarget?: string } | undefined)?.buildTarget;
-      return strategy.debugMode?.(buildTarget) ?? 'printf';
+      return strategy.debugMode?.(buildTarget) ?? 'none';
     })(),
     lastEmittedSource: null,
     cArrayVarNames: new Set(),

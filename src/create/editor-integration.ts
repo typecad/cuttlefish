@@ -1,22 +1,28 @@
 // ---------------------------------------------------------------------------
-// editor-integration.ts — create-time editor scaffolding for .ui highlighting
+// editor-integration.ts — create-time editor scaffolding for the typeCAD/hal
+// VS Code extension
 //
-// Cuttlefish projects keep their UI in .ui single-file components (TS script +
-// CSS style + Svelte-style markup), which no editor knows out of the box. The
-// package ships grammar-only VS Code extensions under
-// assets/editor-extensions/ and `typecad-hal create` copies them into the new
-// project's .vscode/extensions/ folder:
+// The package ships the built typeCAD/hal VS Code extension under
+// assets/editor-extensions/typecad-hal/ and `typecad-hal create` copies it
+// into the new project's .vscode/extensions/ folder. One extension, three
+// surfaces (merged from the former typecad-ui / typecad-debug /
+// typecad-intel trio):
 //
-//   typecad-ui     — .ui syntax highlighting, snippets, file icons, markdown
-//                    ```ui fence highlighting (grammar-only, no code).
-//   typecad-debug  — the built TypeCAD Debug extension (breakpoint syncing +
-//                    F5 commands), so debugging works with zero install.
+//   typecad-hal  — .ui syntax highlighting + snippets + file icons
+//                  (declarative contributes, zero runtime), board-aware
+//                  diagnostics/hovers/quick-fixes from the project's own
+//                  engine, and C++ → .d.ts declaration generation.
 //
 // VS Code (1.89+, trusted workspaces) detects workspace-bundled extensions and
 // installs them scoped to that workspace. The companion .vscode/extensions.json
 // carries forceInstall entries (microsoft/vscode#299830) so VS Code builds with
 // that feature skip the approval prompt; older builds show a one-time install
 // prompt instead.
+//
+// Superseded vendored folders from the pre-merge era (typecad-ui,
+// typecad-debug, typecad-intel) are pruned on every write, so existing
+// projects heal to the single extension the next time the writer runs
+// (create, or `npm run sync:typecad-ui` in the monorepo).
 //
 // A .vscode/tasks.json watch task is also written: it runs the project's
 // `typecad-hal build --watch` dev script with NO_COLOR=1 and parses the
@@ -33,15 +39,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** VS Code extension identifiers (publisher.name) of the bundled extensions. */
-export const TYPECAD_UI_EXTENSION_ID = 'typecad.typecad-ui';
-export const TYPECAD_DEBUG_EXTENSION_ID = 'typecad.vscode-typecad-debug';
+/** VS Code extension identifier (publisher.name) of the bundled extension. */
+export const TYPECAD_EXTENSION_ID = 'typecad.vscode-typecad-hal';
 
 /** Extensions to bundle, as { asset folder name → extension id } pairs. */
 const BUNDLED_EXTENSIONS: ReadonlyArray<{ dir: string; id: string }> = [
-  { dir: 'typecad-ui', id: TYPECAD_UI_EXTENSION_ID },
-  { dir: 'typecad-debug', id: TYPECAD_DEBUG_EXTENSION_ID },
+  { dir: 'typecad-hal', id: TYPECAD_EXTENSION_ID },
 ];
+
+/**
+ * Vendored extension folders from before the three-extension merge. Removed
+ * whenever the writer runs so existing projects converge on the single
+ * `typecad` extension instead of carrying dead copies forever.
+ */
+const SUPERSEDED_EXTENSION_DIRS = ['typecad-ui', 'typecad-debug', 'typecad-intel'];
 
 const ASSETS_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -57,11 +68,6 @@ const ASSETS_ROOT = path.resolve(
  */
 export function bundledExtensionSourceDir(dir: string): string {
   return path.join(ASSETS_ROOT, dir);
-}
-
-/** Kept for compatibility with the original single-extension helper. */
-export function typecadUiExtensionSourceDir(): string {
-  return bundledExtensionSourceDir('typecad-ui');
 }
 
 /** Content of .vscode/extensions.json — auto-installs the workspace-bundled extensions. */
@@ -210,17 +216,24 @@ const BUNDLED_EXTENSION_GLOB = '**/.vscode/extensions/**';
 /**
  * Settings that keep the NPM Scripts pane working on the PROJECT's scripts
  * (build/upload/… — the project's primary commands) while hiding the
- * workspace-bundled editor extensions' manifests: their package.json files
- * are excluded from npm detection individually (so no second package shows
- * up) and the extensions folder is hidden from the Explorer and search — it
- * is internal scaffolding, not user code. `npm.autoDetect` is set to 'on'
- * EXPLICITLY: an earlier scaffold wrote 'off', which blanks the NPM Scripts
- * pane ("the setting npm.autoDetect is off") — and the explicit value also
- * heals settings.json files written by that older scaffold.
+ * workspace-bundled editor extensions' manifests: their containing folder is
+ * excluded from npm detection (so no second package shows up) and the
+ * extensions folder is hidden from the Explorer and search — it is internal
+ * scaffolding, not user code. `npm.autoDetect` is set to 'on' EXPLICITLY: an
+ * earlier scaffold wrote 'off', which blanks the NPM Scripts pane ("the
+ * setting npm.autoDetect is off") — and the explicit value also heals
+ * settings.json files written by that older scaffold.
+ *
+ * `npm.exclude` must be a FOLDER glob, no `/package.json` suffix: VS Code
+ * (extensions/npm/src/tasks.ts, isExcluded) minimatch's each discovered
+ * package.json's PARENT DIRECTORY against the pattern with { dot: true },
+ * so a pattern ending in a file name can never match. minimatch normalizes
+ * Windows separators in the tested path, so the single forward-slash glob
+ * covers both platforms.
  */
 const END_USER_NPM_SETTINGS: Record<string, unknown> = {
   'npm.autoDetect': 'on',
-  'npm.exclude': `${BUNDLED_EXTENSION_GLOB}/package.json`,
+  'npm.exclude': BUNDLED_EXTENSION_GLOB,
   'debug.javascript.codelens.npmScripts': 'never',
   'files.exclude': { '.vscode/extensions': true },
   'search.exclude': { '**/.vscode/extensions': true },
@@ -290,6 +303,16 @@ export function writeEditorIntegration(outDir: string, assetsRoot?: string, hide
     copiedAny = true;
   }
   if (!copiedAny) return [];
+
+  // Prune superseded vendored folders (the pre-merge extension trio) so
+  // existing workspaces converge on the single bundled extension.
+  for (const dir of SUPERSEDED_EXTENSION_DIRS) {
+    const stale = path.join(extensionRoot, dir);
+    if (fs.existsSync(stale)) {
+      fs.rmSync(stale, { recursive: true, force: true });
+      console.log(`! Editor integration: removed superseded extension folder ${stale}`);
+    }
+  }
 
   const extensionsJsonPath = path.join(vscodeDir, 'extensions.json');
   fs.writeFileSync(extensionsJsonPath, generateExtensionsJson(), 'utf-8');

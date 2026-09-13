@@ -530,12 +530,34 @@ export function tryResolveSemanticCall(
       // string literals without quotes; re-quote anything that isn't already
       // a quoted literal or a plain identifier/member expression so the
       // lowering emits valid C++.
-      return { operation: "http.begin", method, url: quoteNonIdentifier(url) };
+      // Header() pairs recorded on the instance ride the begin op: the shim
+      // resets its slot inside begin, so the call-site set_header emissions
+      // (which run before send) would be wiped — begin re-stages them after
+      // its reset, which also makes send() loops restage headers per call.
+      const hdrCount = Number(instance.fieldValues.get("_hdrCount") ?? "0");
+      const headers: string[][] = [];
+      for (let i = 0; i < hdrCount && i < 8; i++) {
+        const n = instance.fieldValues.get(`_hdr${i}n`);
+        const v = instance.fieldValues.get(`_hdr${i}v`);
+        if (n !== undefined && v !== undefined) headers.push([n, v]);
+      }
+      return { operation: "http.begin", method, url: quoteNonIdentifier(url), headers };
     }
     case "httpSetHeader": {
       const name = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
       const value = resolveSemanticArg(args, 1, instance, paramNames, callArgTexts, paramDefaults);
       if (name === null || value === null) return null;
+      // Record the pair on the instance (up to 8) so the NEXT httpBegin from
+      // this request re-emits it after the shim reset. Instance storage on a
+      // named variable persists (halInstances caches it); an inline
+      // `new Request(...).header(...).send()` chain re-resolves the receiver
+      // per link, so only the call-site emission below carries the pair there.
+      const count = Number(instance.fieldValues.get("_hdrCount") ?? "0");
+      if (count < 8) {
+        instance.fieldValues.set(`_hdr${count}n`, name);
+        instance.fieldValues.set(`_hdr${count}v`, value);
+        instance.fieldValues.set("_hdrCount", String(count + 1));
+      }
       return { operation: "http.set_header", name, value };
     }
     case "httpSetTimeout": {
@@ -770,6 +792,11 @@ export function tryResolveSemanticCall(
     }
 
     // ── MQTT ──
+    case "mqttSetCaCert": {
+      const pem = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
+      if (pem === null) return null;
+      return { operation: "mqtt.set_ca_cert", pem };
+    }
     case "mqttConnect": {
       const uri = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
       const clientId = resolveSemanticArg(args, 1, instance, paramNames, callArgTexts, paramDefaults);
@@ -981,8 +1008,14 @@ export function tryResolveSemanticCall(
       const bus = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
       const address = resolveNumericArg(args, 1, instance, paramNames, callArgTexts, paramDefaults);
       const hz = resolveNumericArg(args, 2, instance, paramNames, callArgTexts, paramDefaults);
-      const reg = resolveNumericArg(args, 3, instance, paramNames, callArgTexts, paramDefaults);
-      const value = resolveNumericArg(args, 4, instance, paramNames, callArgTexts, paramDefaults);
+      // reg/value may be runtime expressions (a variable, a ternary) — the
+      // Zephyr lowering interpolates them inside static_cast<uint8_t>(...),
+      // so the expression text is valid C++. Resolving them strictly as
+      // numbers made any non-literal argument (e.g. `cond ? 1 : 0`) return
+      // null here, silently dropping the whole i2c op — the call then fell
+      // back to raw, unlowered C++ and vanished from peripheral usage.
+      const reg = resolveNumericOrExpression(args, 3, instance, paramNames, callArgTexts, paramDefaults);
+      const value = resolveNumericOrExpression(args, 4, instance, paramNames, callArgTexts, paramDefaults);
       if (bus === null || address === null || hz === null || reg === null || value === null) return null;
       return { operation: "i2c.reg_write", bus, address, hz, reg, value };
     }
@@ -991,7 +1024,7 @@ export function tryResolveSemanticCall(
       const bus = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
       const address = resolveNumericArg(args, 1, instance, paramNames, callArgTexts, paramDefaults);
       const hz = resolveNumericArg(args, 2, instance, paramNames, callArgTexts, paramDefaults);
-      const reg = resolveNumericArg(args, 3, instance, paramNames, callArgTexts, paramDefaults);
+      const reg = resolveNumericOrExpression(args, 3, instance, paramNames, callArgTexts, paramDefaults);
       if (bus === null || address === null || hz === null || reg === null) return null;
       return { operation: "i2c.reg_read", bus, address, hz, reg };
     }
@@ -1000,9 +1033,9 @@ export function tryResolveSemanticCall(
       const bus = resolveSemanticArg(args, 0, instance, paramNames, callArgTexts, paramDefaults);
       const address = resolveNumericArg(args, 1, instance, paramNames, callArgTexts, paramDefaults);
       const hz = resolveNumericArg(args, 2, instance, paramNames, callArgTexts, paramDefaults);
-      const reg = resolveNumericArg(args, 3, instance, paramNames, callArgTexts, paramDefaults);
-      const mask = resolveNumericArg(args, 4, instance, paramNames, callArgTexts, paramDefaults);
-      const value = resolveNumericArg(args, 5, instance, paramNames, callArgTexts, paramDefaults);
+      const reg = resolveNumericOrExpression(args, 3, instance, paramNames, callArgTexts, paramDefaults);
+      const mask = resolveNumericOrExpression(args, 4, instance, paramNames, callArgTexts, paramDefaults);
+      const value = resolveNumericOrExpression(args, 5, instance, paramNames, callArgTexts, paramDefaults);
       if (bus === null || address === null || hz === null || reg === null || mask === null || value === null) return null;
       return { operation: "i2c.reg_update", bus, address, hz, reg, mask, value };
     }

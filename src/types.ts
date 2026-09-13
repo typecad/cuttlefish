@@ -118,24 +118,10 @@ export interface TranspileOptions {
   strictCss?: boolean;
 }
 
-export interface LibraryDefinitionCondition {
-  target?: TargetProfile;
-  architecture?: string;
-  core?: string;
-  fqbnIncludes?: string;
-}
-
-interface LibraryDefinitionVariant {
-  when: LibraryDefinitionCondition;
-  include: string;
-  symbols?: Record<string, string>;
-}
-
 export interface LibraryDefinition {
   module: string;
   include: string;
   symbols?: Record<string, string>;
-  variants?: LibraryDefinitionVariant[];
 }
 
 export interface CommandLineOptions {
@@ -288,6 +274,21 @@ export interface DebugServerCommandOptions {
 export interface TestCommandOptions {
   command: "test";
   forwarded: string[];
+}
+
+/** Parsed `typecad-hal query [subject]` options. */
+export interface QueryCommandOptions {
+  command: "query";
+  /** Inspection subject; empty prints the subject list. */
+  subject: string;
+  /** Entry file override; defaults to the config's entry field. */
+  entryFile?: string;
+  /** Board target override (pins / devicetree facts). */
+  board?: string;
+  /** Framework package override. */
+  framework?: string;
+  /** Machine-readable output. */
+  json?: boolean;
 }
 
 /** Parsed `typecad-hal library <subcommand>` options. */

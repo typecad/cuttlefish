@@ -4,13 +4,14 @@ import fs from "node:fs";
 import { parseCommandLine, printHelp } from "./utils/cli.js";
 import type { GeneratedOutputs } from "./types.js";
 import type { CreateCommandOptions } from "./types.js";
+import type { QueryCommandOptions } from "./types.js";
 import type { CleanCommandOptions, DebugServerCommandOptions } from "./types.js";
 import { runClean } from "./clean.js";
 import { runLibraryCommand } from "./library/cli.js";
 import type { ScaffoldProjectResult } from "./create/index.js";
 import { scaffoldProject, printCreateNextSteps, KNOWN_TARGETS, frameworksForTarget, frameworkCatalogEntry, FRAMEWORK_CATALOG, frameworkTargetProfile, probeMethodsForBoard, probeRunnerQuirks, starterAppRel } from "./create/index.js";
 import { findPackBoard, packBoardAsTarget } from "./create/pack-targets.js";
-import { activeBoardCatalog, assertZephyrSdkForCreate, formatZephyrSdkFound, ensureFreshBoardCatalog, resetBoardCatalogOverlayCache, sdkFingerprint, PINNED_ZEPHYR_MANIFEST_REV } from "./board-catalog/index.js";
+import { activeBoardCatalog, assertZephyrSdkForCreate, checkZephyrSdk, formatZephyrSdkFound, ensureFreshBoardCatalog, resetBoardCatalogOverlayCache, sdkFingerprint, PINNED_ZEPHYR_MANIFEST_REV } from "./board-catalog/index.js";
 import { generateFrameworkDebugArtifacts } from "./create/debug-artifacts.js";
 import { runCreateWizard } from "./create/index.js";
 import { installProjectDependencies } from "./create/install-deps.js";
@@ -21,7 +22,7 @@ import { compileSource, uploadFirmware, monitorDevice, debugServer } from "./pla
 import { resolveStrategy } from "./platform/registry.js";
 import { loadFrameworkPackage } from "./framework-package.js";
 import { getLoadedFramework, hasLoadedFramework } from "./framework-registry.js";
-import { loadTypecadConfig, generateVirtualTypeDeclaration, regenBoardModule } from "./config-loader.js";
+import { loadTypecadConfig, generateVirtualTypeDeclaration, regenBoardModule, ensureLintBoilerplate } from "./config-loader.js";
 import { generateContractBoard } from "./contract/index.js";
 import { requireUIHook, hasUIHook } from "./ui-hook.js";
 import { loadUIEngine } from "./ui/ui-bridge.js";
@@ -77,7 +78,7 @@ async function handleCreate(options: CreateCommandOptions): Promise<void> {
     const sdk = assertZephyrSdkForCreate();
     if (sdk) {
       console.log(chalk.gray('  Zephyr SDK:'));
-      for (const line of formatZephyrSdkFound(sdk)) console.log(chalk.gray(line));
+      for (const line of formatZephyrSdkFound(sdk)) console.log(line);
     }
     // Build/refresh the board registry from the installed SDK now — the
     // wizard's board list and --board resolution below read it.
@@ -201,8 +202,8 @@ async function handleCreate(options: CreateCommandOptions): Promise<void> {
       // soc rides the config only for bare-silicon/contract projects — a
       // board target's soc derives from the identifier at boardgen time.
       ...(target.board ? {} : { soc: target.soc }),
-      // Zephyr consoles default 115200; the 9600 default is the Arduino-class
-      // convention.
+      // Zephyr consoles default 115200; the 9600 fallback remains for any
+      // future framework without a console-rate convention.
       baudRate: target.isNative ? undefined : (options.baud ?? (frameworkId === 'zephyr' ? 115200 : 9600)),
       includeStarter: !options.noStarter,
       ...(options.port ? { port: options.port } : {}),
@@ -643,6 +644,15 @@ async function main(): Promise<void> {
       }
     }
 
+    // query — read-only inspection of the firmware design (agent-friendly,
+    // pcb-style subjects with --json). Runs before the !options.inputFile
+    // guard: it resolves its own entry from the config or a positional.
+    if (options.command === "query") {
+      const { runQuery } = await import("./query.js");
+      await runQuery(options as QueryCommandOptions);
+      return;
+    }
+
     // gen-decls runs before the !options.inputFile guard below: in --all mode
     // it intentionally has no inputFile (it scans scanDir instead), so the
     // generic "Missing input file path" check would otherwise block it.
@@ -779,6 +789,13 @@ async function main(): Promise<void> {
         // Strategy not yet loaded — env.d.ts will have generic declarations only
       }
       generateVirtualTypeDeclaration(config, platformDeclarations);
+      // Keep the ESLint gate's boilerplate materialized (same contract as
+      // env.d.ts: generated, never committed, healed on every run) and honor
+      // the config's explicit gate opt-out for this transpile.
+      ensureLintBoilerplate(config);
+      if (config.lint === false) {
+        (options as any).skipLint = true;
+      }
       // @typecad/ui is optional — skip UI type-decl generation when the engine
       // is not loaded (no UI modules exist to declare).
       if (hasUIHook()) {
@@ -786,12 +803,23 @@ async function main(): Promise<void> {
       }
     }
 
-    // Print branded header and build info
+    // Print branded header and build info. The framework line is gone (one
+    // framework); in its place, the detected Zephyr tree + toolchain, the
+    // same printout `create` shows. Only the ok-status prints — build does
+    // not gate on the pin (create does), and the framework's own compat
+    // check reports anything fatal later with actionable detail. Board-less
+    // custom-board projects carry their identity only in
+    // frameworkData.buildTarget — show it under the Board label rather than
+    // as a second, redundant line.
     ui.printHeader();
+    const sdkCheck = checkZephyrSdk();
+    if (sdkCheck.status === 'ok') {
+      console.log(chalk.gray('  Zephyr SDK:'));
+      for (const line of formatZephyrSdkFound(sdkCheck)) console.log(line);
+    }
     ui.printBuildInfo({
-      framework: effectiveFrameworkPackage,
-      board: effectiveBoardTarget,
-      buildTarget: (effectivePlatformContext?.frameworkData?.buildTarget as string | undefined),
+      board: effectiveBoardTarget ??
+        (effectivePlatformContext?.frameworkData?.buildTarget as string | undefined),
     });
 
     // ── Watch mode ────────────────────────────────────────────────────────

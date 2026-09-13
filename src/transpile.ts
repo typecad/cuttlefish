@@ -31,11 +31,10 @@ import { isSafetyImportSpecifier } from "./safety/specifiers.js";
 import { setDisplayProfile, resetDisplayProfile, getDisplayProfile } from "./stores/display-profile-store.js";
 import { setThemeCss, resetThemeCss, setThemeClass } from "./stores/theme-store.js";
 import { emitCpp, registerAllEnumNames } from "./emit/cpp-emitter.js";
-import { Diagnostic, GeneratedOutputs, TranspileOptions, TreeShakingOptions } from "./types.js";
+import { Diagnostic, GeneratedOutputs, LibraryDefinition, TranspileOptions, TreeShakingOptions } from "./types.js";
 import { readText, writeText, resetWrittenFiles, wasWrittenThisRun } from "./utils/fs.js";
 import { debug as logDebug, info } from "./utils/logger.js";
 import { printDebugStrategy } from "./utils/ui.js";
-import { loadLibraryDefinitions } from "./libdef/registry.js";
 import {
   resetCuttlefishLibraries,
   validateCuttlefishLibraries,
@@ -63,7 +62,6 @@ import { setActiveStrategy, loadHALModules, setHALProjectDir } from "./ir/hal-re
 import { preprocess as testRunnerPreprocess } from "./test-runner/preprocessor.js";
 import { CompilationContext, contextStorage } from "./ir/build-ir-state.js";
 import { buildSymbolTable, mergeSymbolTable, resolveInheritance, createSymbolTable } from "./ir/symbol-table.js";
-import { loadBreakpoints, preprocess as debugPreprocess } from "./debug/index.js";
 import { collectTranspileGraph } from "./orchestrator/graph-builder.js";
 import { typeCheckFiles } from "./orchestrator/type-checker.js";
 import { runSemanticGates } from "./orchestrator/type-checker.js";
@@ -309,7 +307,7 @@ function throwIfFatalDiagnostics(entries: LocatedDiagnostic[]): void {
  * doesn't export a FrameworkStrategy, allowing emitCpp to fall back to
  * target-based resolution via the platform registry.
  */
-function loadPlatformStrategy(
+export function loadPlatformStrategy(
   frameworkPackage: string | undefined,
   _boardTarget: string | undefined,
   fromDir: string,
@@ -562,16 +560,11 @@ export async function transpileFile(options: TranspileOptions): Promise<Generate
   }
   const npmPackages = graphResult.npmPackages;
 
-  const definitions = loadLibraryDefinitions(sourceDir);
-
-  // Cuttlefish library packages: the import resolves to the library's shim
-  // include (e.g. '"__tc_rgbled.h"') instead of a transpiled module header.
-  // Project-local .libdef.json files keep precedence.
+  // Library packages: the import resolves to the library's shim include
+  // (e.g. '"__tc_rgbled.h"') instead of a transpiled module header.
+  const definitions: Map<string, LibraryDefinition> = new Map();
   for (const libdef of cuttlefishLibraryLibdefs()) {
-    const key = libraryDefinitionKey(libdef.module);
-    if (!definitions.has(key)) {
-      definitions.set(key, libdef);
-    }
+    definitions.set(libraryDefinitionKey(libdef.module), libdef);
   }
 
   let entryOutputs: GeneratedOutputs | undefined;
@@ -638,8 +631,25 @@ export async function transpileFile(options: TranspileOptions): Promise<Generate
     npmPackage: ReturnType<typeof npmPackages.get>;
   };
 
-  // Load breakpoints if debug mode is enabled
-  const breakpoints = options.debug ? loadBreakpoints(sourceDir) : undefined;
+  // --debug is the native source-level (GDB) flow only. The printf/Serial
+  // breakpoint instrumentation pipeline was removed; a target without a
+  // debug-capable probe method (bootloader-only boards, unresolvable targets,
+  // hosted/generic output) cannot be source-debugged through the engine, and
+  // silently building an un-debuggable binary would hide that — fail the
+  // transpile with an explicit diagnostic instead.
+  if (options.debug) {
+    const buildTarget = (options.platformContext?.frameworkData as { buildTarget?: string } | undefined)?.buildTarget;
+    const debugMode = strategy.debugMode?.(buildTarget) ?? "none";
+    if (debugMode !== "gdb") {
+      diagnostics.push({
+        severity: "error",
+        code: "debug-unsupported-target",
+        message: `--debug is not available for this target${buildTarget ? ` ('${buildTarget}')` : ""}: the board's probe facts carry no debug-capable method (bootloader-only or unknown board).`,
+        hint: `Source-level debugging needs a board whose facts list a debug probe (openocd/jlink). Print-state debugging via the serial console (USB0/UART0 writeLine) works on every board.`,
+        filePath: path.basename(options.inputFile),
+      });
+    }
+  }
 
   // ── Determine files to transpile ─────────────────────────────────────────
   // Incremental builds are disabled, so every file in the graph is processed.
@@ -728,24 +738,6 @@ export async function transpileFile(options: TranspileOptions): Promise<Generate
     // (src/test-runner/) — always present.
     if (sourceText.includes("@typecad/hal/testing")) {
       sourceText = loadExpectPreprocessor()(sourceText, filePath);
-    }
-
-    // Printf instrumentation runs only in printf debug mode. In gdb mode
-    // (e.g. ESP32-S3), --debug emits #line markers at the emit stage and
-    // uses VS Code native breakpoints; the printf preprocessor is skipped
-    // so the source reaches IR/emit unmodified. The preprocessor instruments
-    // with the SAME strategy that emits below — its debug dialect must match
-    // the runtime the generated code links against.
-    const buildTarget = (options.platformContext?.frameworkData as { buildTarget?: string } | undefined)?.buildTarget;
-    const debugMode = strategy.debugMode?.(buildTarget) ?? 'printf';
-    if (options.debug && breakpoints && debugMode === 'printf') {
-      const instrumented = debugPreprocess({
-        fileName: filePath,
-        breakpoints,
-        source: sourceText,
-        strategy,
-      });
-      sourceText = instrumented;
     }
 
     profiler.startTimer(`ir:build-ir:${fileBasename}`);
@@ -1091,6 +1083,15 @@ export async function transpileFile(options: TranspileOptions): Promise<Generate
   if (options.diagnostics) {
     try {
       const entryPreBuilt = preBuilt.get(entryFile);
+      // The board constants land on whichever module's IR was built while the
+      // board import was traversed — not always the entry's. Any populated
+      // map is the same generated board.json; scan like the board-constants
+      // writer below does.
+      let reportBoardConstants: Map<string, string | number | boolean> | undefined;
+      for (const pb of preBuilt.values()) {
+        const bc = pb.programIR.boardConstants as Map<string, string | number | boolean> | undefined;
+        if (bc && bc.size > 0) { reportBoardConstants = bc; break; }
+      }
       const report = buildDiagnosticsReport({
         entryFile,
         program: entryPreBuilt?.programIR ?? null,
@@ -1105,6 +1106,7 @@ export async function transpileFile(options: TranspileOptions): Promise<Generate
         preBuilt,
         profiler,
         removedSymbols: allRemovedSymbols,
+        boardConstants: reportBoardConstants,
       });
       writeDiagnosticsReport(report, entryPreBuilt?.programIR ?? null, outDir);
       diagnosticsReportPath = path.join(outDir, "diagnostics.md");
