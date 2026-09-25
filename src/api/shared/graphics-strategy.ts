@@ -77,7 +77,22 @@ export interface PlatformGraphicsStrategy {
    *  rgb666/rgb888/palette, at which point resolveColor888 is the resolution
    *  entry point. Widening only the return type now would break assignment to
    *  the "rgb565" | "mono" field types downstream. */
-  colorFormat(): "rgb565" | "rgb666" | "rgb888" | "mono";
+  colorFormat(): "rgb565" | "rgb666" | "rgb888" | "mono" | "gray8";
+
+  /** Per-driver color-format default for drop-in configs (driver = DT
+   *  compatible, no registry profile, no explicit config.colorFormat). The
+   *  engine consults this when synthesizing the profile so framework-known
+   *  panel classes (e.g. Zephyr's 1bpp OLED compatibles) lower consistently
+   *  engine-side AND framework-side — without it, a mono panel named by
+   *  compatible would flatten colors at rgb565 while the framework adapter
+   *  dispatches the mono path. Return undefined (or omit the hook) to keep
+   *  the generic rgb565 default. */
+  colorFormatForDriver?(driver: string): "rgb565" | "rgb666" | "rgb888" | "mono" | "gray8" | undefined;
+  /** Panel CLASS for a drop-in driver (engine-side capability derivation —
+   *  'eink' switches the refresh model to deferred; mirrors how
+   *  colorFormatForDriver keeps build-time lowering consistent with the
+   *  framework's adapter dispatch). */
+  displayClassForDriver?(driver: string): "eink" | "oled" | undefined;
 
   /** Per-target capacity caps (node/binding/transition limits, storage). */
   graphicsCapacity(): GraphicsCapacity;

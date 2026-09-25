@@ -595,7 +595,26 @@ export function parseConfigFile(configPath: string): ResolvedTypecadConfig | und
   const zephyrRunner = flat.get("zephyr.runner");
   const zephyrProbe = flat.get("zephyr.probe");
   const zephyrCustomBoard = flat.get("zephyr.customBoard");
-  if (zephyrKconfig || zephyrCmakeArgs || zephyrRunnerArgs || typeof zephyrRunner === "string" || typeof zephyrProbe === "string" || typeof zephyrCustomBoard === "boolean") {
+  const zephyrTraceEnabled = flat.get("zephyr.trace.enabled");
+  const zephyrTraceInterval = flat.get("zephyr.trace.intervalMs");
+  const zephyrTraceAlarmStack = flat.get("zephyr.trace.alarms.stackMinBytes");
+  const zephyrTraceAlarmFrame = flat.get("zephyr.trace.alarms.frameMaxMs");
+  // Raw values pass through typed or not — the Zod schema is the authority
+  // (a typo like enabled: 'yes' must FAIL validation, not silently vanish).
+  const zephyrTraceAlarms = (zephyrTraceAlarmStack !== undefined || zephyrTraceAlarmFrame !== undefined)
+    ? {
+        ...(zephyrTraceAlarmStack !== undefined ? { stackMinBytes: zephyrTraceAlarmStack } : {}),
+        ...(zephyrTraceAlarmFrame !== undefined ? { frameMaxMs: zephyrTraceAlarmFrame } : {}),
+      }
+    : undefined;
+  const zephyrTrace = (zephyrTraceEnabled !== undefined || zephyrTraceInterval !== undefined || zephyrTraceAlarms !== undefined)
+    ? {
+        ...(zephyrTraceEnabled !== undefined ? { enabled: zephyrTraceEnabled } : {}),
+        ...(zephyrTraceInterval !== undefined ? { intervalMs: zephyrTraceInterval } : {}),
+        ...(zephyrTraceAlarms !== undefined ? { alarms: zephyrTraceAlarms } : {}),
+      }
+    : undefined;
+  if (zephyrKconfig || zephyrCmakeArgs || zephyrRunnerArgs || typeof zephyrRunner === "string" || typeof zephyrProbe === "string" || typeof zephyrCustomBoard === "boolean" || zephyrTrace) {
     resolved.zephyrConfig = {
       ...(zephyrKconfig ? { kconfig: zephyrKconfig } : {}),
       ...(zephyrCmakeArgs ? { cmakeArgs: zephyrCmakeArgs } : {}),
@@ -603,6 +622,7 @@ export function parseConfigFile(configPath: string): ResolvedTypecadConfig | und
       ...(typeof zephyrProbe === "string" ? { probe: zephyrProbe } : {}),
       ...(typeof zephyrRunner === "string" ? { runner: zephyrRunner } : {}),
       ...(zephyrCustomBoard === true ? { customBoard: true } : {}),
+      ...(zephyrTrace ? { trace: zephyrTrace } : {}),
     };
   }
 

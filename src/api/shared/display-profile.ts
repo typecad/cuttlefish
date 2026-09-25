@@ -63,7 +63,7 @@ export interface DisplayProfile {
   /** Native panel dimensions before rotation, when they differ from layout size. */
   nativeWidth?: number;
   nativeHeight?: number;
-  colorFormat: "rgb565" | "rgb666" | "rgb888" | "mono";
+  colorFormat: "rgb565" | "rgb666" | "rgb888" | "mono" | "gray8";
   /** Display class: "tft" (default) for fast-refresh panels, "eink" for
    *  bistable/slow-refresh panels. Drives capability derivation + @media. */
   displayClass?: "tft" | "eink" | "oled";
@@ -91,6 +91,23 @@ export interface DisplayProfile {
    *  When wired, panel updates wait for the TE frame pulse instead of the
    *  GET_SCANLINE readback (no MISO needed; see also scanlineSync). */
   tearingEffectPin?: number;
+  /** E-ink BUSY GPIO (active level per the panel driver — ssd16xx is
+   *  active-high). Required by the ssd16xx/uc81xx bindings. */
+  busyPin?: number;
+  /** Panel quirk (drop-in driver path): swap the R and B channels of each
+   *  RGB565 pixel at pack time, for clone panels whose 16-bit channel
+   *  routing is crossed. Frameworks that don't need it ignore it. */
+  channelSwapRb?: boolean;
+  /** Panel quirk (drop-in driver path): pixels must be byte-swapped on the
+   *  wire (RGB565 endianness) — expressed as the st7796s family's
+   *  rgb-is-inverted DT property, which flips the format the driver reports
+   *  so the adapter swaps at pack time. Clone SPI panels whose white reads
+   *  purple / dark reads green need this. */
+  rgbInverted?: boolean;
+  /** Panel quirk (drop-in driver path): require a mipi-dbi host that holds
+   *  CS across each command+data burst (clone ST77xx panels the stock SPI
+   *  bridge scrambles). Frameworks without a local host ignore it. */
+  csHold?: boolean;
   touch?: TouchProfile;
   /** Enable antialiased rendering for circles, lines, rounded corners, and text
    *  unless a node opts out with font-smoothing:none.
@@ -151,6 +168,10 @@ export interface DisplayConfig {
   backlightPin?: number;
   spiFrequency?: number;
   spiPins?: { mosi: number; sck: number; miso: number };
+  /** I2C bus pins for i2c-family panels (mono OLEDs, ssd1306-class) — the
+   *  Zephyr overlay remuxes the I2C controller's pinctrl to these pins; the
+   *  board's default I2C pins rarely match a breakout's wiring. */
+  i2cPins?: { sda: number; scl: number };
   /** Pixel color channel order expected by the panel module. Default: rgb. */
   colorOrder?: "rgb" | "bgr";
   /** Optional explicit display inversion override. */
@@ -167,6 +188,15 @@ export interface DisplayConfig {
    *  TE frame pulse (tear-free writes, no MISO readback); the Zephyr overlay
    *  emits te-gpios on the display DT node and the adapter raises TEON. */
   tearingEffectPin?: number;
+  /** E-ink BUSY GPIO (active level per the panel driver — ssd16xx is
+   *  active-high). Required by the ssd16xx/uc81xx bindings. */
+  busyPin?: number;
+  /** R/B channel swap at pack time (clone-panel quirk; see DisplayConfig). */
+  channelSwapRb?: boolean;
+  /** RGB565 byte-order inversion (clone-panel quirk; see DisplayConfig). */
+  rgbInverted?: boolean;
+  /** CS-held mipi-dbi host required (clone-panel quirk; see DisplayConfig). */
+  csHold?: boolean;
   touch?: TouchProfile | false;
   cs?: number;
   dc?: number;
@@ -351,6 +381,7 @@ export function resolveDisplayProfile(
       colorOrder: config.colorOrder,
       invertDisplay: config.invertDisplay,
       tearingEffectPin: config.tearingEffectPin,
+      busyPin: config.busyPin,
       touch: config.touch === false ? undefined : config.touch,
       displayClass: config.displayClass,
       capabilities: config.capabilities,
@@ -372,6 +403,9 @@ export function resolveDisplayProfile(
   if (config.invertDisplay !== undefined) base.invertDisplay = config.invertDisplay;
   if (config.tearingEffectPin !== undefined) base.tearingEffectPin = config.tearingEffectPin;
   if (config.scanlineSync !== undefined) base.scanlineSync = config.scanlineSync;
+  if (config.channelSwapRb !== undefined) base.channelSwapRb = config.channelSwapRb;
+  if (config.rgbInverted !== undefined) base.rgbInverted = config.rgbInverted;
+  if (config.csHold !== undefined) base.csHold = config.csHold;
   if (config.touch === false) base.touch = undefined;
   else if (config.touch !== undefined) base.touch = config.touch;
   if (config.antialias !== undefined) base.antialias = config.antialias;
